@@ -22,12 +22,40 @@
             height: 100vh;
         }
 
+        .toggle-sidebar-btn {
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            z-index: 1000;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            display: none;
+        }
+
+        .toggle-sidebar-btn:hover {
+            background-color: #0056b3;
+        }
+
+        .toggle-sidebar-btn.visible {
+            display: block;
+        }
+
         .sidebar {
             width: 380px;
             background-color: white;
             padding: 20px;
             overflow-y: auto;
             box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+            transition: margin-left 0.3s ease;
+        }
+
+        .sidebar.minimized {
+            margin-left: -380px;
         }
 
         .sidebar h1 {
@@ -123,6 +151,19 @@
             background-color: #c82333;
         }
 
+        .control-buttons {
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+        }
+
+        .control-buttons button {
+            flex: 1;
+            margin-top: 0;
+            font-size: 12px;
+            padding: 8px;
+        }
+
         .info-box {
             background-color: #e7f3ff;
             border-left: 4px solid #007bff;
@@ -165,6 +206,19 @@
             margin-bottom: 5px;
         }
 
+        .step-info {
+            background-color: #fff3cd;
+            border-left: 4px solid #ffc107;
+            padding: 12px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-size: 13px;
+        }
+
+        .step-info strong {
+            color: #333;
+        }
+
         #map {
             flex: 1;
             background-color: #e0e0e0;
@@ -174,7 +228,7 @@
             background-color: #f9f9f9;
             padding: 10px;
             border-radius: 4px;
-            max-height: 200px;
+            max-height: 150px;
             overflow-y: auto;
             margin-top: 10px;
         }
@@ -187,16 +241,42 @@
             font-size: 12px;
             color: #555;
             border-left: 3px solid #007bff;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .city-item:hover {
+            background-color: #f0f0f0;
+        }
+
+        .city-item.active {
+            background-color: #fff3cd;
+            border-left-color: #ffc107;
         }
 
         .city-item strong {
             color: #333;
         }
+
+        .step-nav {
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+        }
+
+        .step-nav button {
+            flex: 1;
+            margin-top: 0;
+            font-size: 12px;
+            padding: 8px;
+        }
     </style>
 </head>
 <body>
+    <button class="toggle-sidebar-btn" onclick="toggleSidebar()">☰ Menu</button>
+
     <div class="container">
-        <div class="sidebar">
+        <div class="sidebar" id="sidebar">
             <h1>🗺️ Route Plotter</h1>
             
             <div class="info-box">
@@ -235,12 +315,28 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
             <button onclick="plotRoute()">📍 Plot Route</button>
             <button class="clear-btn" onclick="clearRoute()">🗑️ Clear Route</button>
 
+            <div class="control-buttons">
+                <button onclick="toggleSidebar()" style="background-color: #6c757d; margin-top: 0;">➖ Hide Sidebar</button>
+            </div>
+
             <div id="message"></div>
 
             <div id="routeInfo" class="route-info" style="display: none;">
                 <h3>Route Statistics</h3>
                 <p><strong>Cities:</strong> <span id="cityCount">0</span></p>
                 <p><strong>Total Distance:</strong> <span id="totalDistance">0</span> miles</p>
+                
+                <div id="stepInfo" class="step-info" style="display: none;">
+                    <strong>Current Stop:</strong> <span id="currentCityName">-</span><br>
+                    <strong>Stop #:</strong> <span id="currentStopNum">-</span> of <span id="totalStops">-</span><br>
+                    <strong>Coordinates:</strong> <span id="currentCoords">-</span>
+                </div>
+
+                <div class="step-nav" id="stepNav" style="display: none;">
+                    <button onclick="previousStep()" style="background-color: #6c757d; margin-top: 0;">⬅️ Previous</button>
+                    <button onclick="nextStep()" style="background-color: #28a745; margin-top: 0;">Next ➡️</button>
+                </div>
+
                 <div id="cityList" class="city-list"></div>
             </div>
         </div>
@@ -263,6 +359,17 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
         let polyline = null;
         let totalDistance = 0;
         let currentTab = 'csv';
+        let allCities = [];
+        let currentStepIndex = -1;
+        let stepMarkers = [];
+
+        // Toggle sidebar
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const toggleBtn = document.querySelector('.toggle-sidebar-btn');
+            sidebar.classList.toggle('minimized');
+            toggleBtn.classList.toggle('visible');
+        }
 
         // Switch between tabs
         function switchTab(tab) {
@@ -371,6 +478,8 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
                 }
 
                 clearRoute();
+                allCities = cities;
+                currentStepIndex = -1;
 
                 const latlngs = [];
                 let prevLat, prevLng;
@@ -449,19 +558,105 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
         function updateRouteInfo(cities) {
             document.getElementById('cityCount').textContent = cities.length;
             document.getElementById('totalDistance').textContent = totalDistance.toFixed(2);
+            document.getElementById('totalStops').textContent = cities.length;
 
             let cityListHTML = '';
             cities.forEach((city, index) => {
-                cityListHTML += `<div class="city-item"><strong>${index + 1}. ${city.name}</strong><br>${city.lat.toFixed(4)}, ${city.lng.toFixed(4)}</div>`;
+                cityListHTML += `<div class="city-item" onclick="goToStep(${index})" id="city-item-${index}"><strong>${index + 1}. ${city.name}</strong><br>${city.lat.toFixed(4)}, ${city.lng.toFixed(4)}</div>`;
             });
 
             document.getElementById('cityList').innerHTML = cityListHTML;
             document.getElementById('routeInfo').style.display = 'block';
+            document.getElementById('stepInfo').style.display = 'block';
+            document.getElementById('stepNav').style.display = 'flex';
+        }
+
+        function goToStep(index) {
+            currentStepIndex = index;
+            updateStep();
+        }
+
+        function nextStep() {
+            if (currentStepIndex < allCities.length - 1) {
+                currentStepIndex++;
+                updateStep();
+            }
+        }
+
+        function previousStep() {
+            if (currentStepIndex > 0) {
+                currentStepIndex--;
+                updateStep();
+            }
+        }
+
+        function updateStep() {
+            if (currentStepIndex < 0 || currentStepIndex >= allCities.length) return;
+
+            const city = allCities[currentStepIndex];
+            const lat = parseFloat(city.lat);
+            const lng = parseFloat(city.lng);
+
+            // Update step info
+            document.getElementById('currentCityName').textContent = city.name;
+            document.getElementById('currentStopNum').textContent = currentStepIndex + 1;
+            document.getElementById('currentCoords').textContent = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+            // Update city list highlighting
+            document.querySelectorAll('.city-item').forEach((item, index) => {
+                item.classList.remove('active');
+                if (index === currentStepIndex) {
+                    item.classList.add('active');
+                    item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                }
+            });
+
+            // Clear previous step marker
+            stepMarkers.forEach(marker => map.removeLayer(marker));
+            stepMarkers = [];
+
+            // Create large marker for current step
+            const stepMarker = L.circleMarker([lat, lng], {
+                radius: 15,
+                fillColor: '#ffc107',
+                color: '#fff',
+                weight: 3,
+                opacity: 1,
+                fillOpacity: 0.9
+            }).addTo(map);
+
+            const popupContent = `
+                <strong>📍 ${city.name}</strong><br>
+                Stop #${currentStepIndex + 1} of ${allCities.length}<br>
+                Lat: ${lat.toFixed(4)}<br>
+                Lng: ${lng.toFixed(4)}
+            `;
+            stepMarker.bindPopup(popupContent).openPopup();
+
+            stepMarkers.push(stepMarker);
+
+            // Add label
+            L.marker([lat, lng], {
+                icon: L.divIcon({
+                    className: 'city-label-step',
+                    html: `<div style="background: #ffc107; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.4);">${currentStepIndex + 1}</div>`,
+                    iconSize: [40, 40],
+                    iconAnchor: [20, 20]
+                })
+            }).addTo(map);
+
+            stepMarkers.push(L.marker([lat, lng]));
+
+            // Pan to current city
+            map.panTo([lat, lng]);
+            map.setZoom(10);
         }
 
         function clearRoute() {
             markers.forEach(marker => map.removeLayer(marker));
+            stepMarkers.forEach(marker => map.removeLayer(marker));
             markers = [];
+            stepMarkers = [];
 
             if (polyline) {
                 map.removeLayer(polyline);
@@ -469,6 +664,8 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
             }
 
             totalDistance = 0;
+            currentStepIndex = -1;
+            allCities = [];
             document.getElementById('routeInfo').style.display = 'none';
         }
 

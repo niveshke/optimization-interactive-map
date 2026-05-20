@@ -228,7 +228,7 @@
             background-color: #f9f9f9;
             padding: 10px;
             border-radius: 4px;
-            max-height: 150px;
+            max-height: 100px;
             overflow-y: auto;
             margin-top: 10px;
         }
@@ -242,16 +242,11 @@
             color: #555;
             border-left: 3px solid #007bff;
             cursor: pointer;
-            transition: background-color 0.2s;
+            transition: all 0.2s;
         }
 
         .city-item:hover {
             background-color: #f0f0f0;
-        }
-
-        .city-item.active {
-            background-color: #fff3cd;
-            border-left-color: #ffc107;
         }
 
         .city-item strong {
@@ -269,6 +264,12 @@
             margin-top: 0;
             font-size: 12px;
             padding: 8px;
+        }
+
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            opacity: 0.6;
         }
     </style>
 </head>
@@ -323,13 +324,13 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
 
             <div id="routeInfo" class="route-info" style="display: none;">
                 <h3>Route Statistics</h3>
-                <p><strong>Cities:</strong> <span id="cityCount">0</span></p>
-                <p><strong>Total Distance:</strong> <span id="totalDistance">0</span> miles</p>
+                <p><strong>Total Cities:</strong> <span id="cityCount">0</span></p>
+                <p><strong>Total Route Distance:</strong> <span id="totalDistance">0</span> miles</p>
                 
                 <div id="stepInfo" class="step-info" style="display: none;">
-                    <strong>Current Stop:</strong> <span id="currentCityName">-</span><br>
-                    <strong>Stop #:</strong> <span id="currentStopNum">-</span> of <span id="totalStops">-</span><br>
-                    <strong>Coordinates:</strong> <span id="currentCoords">-</span>
+                    <strong>Current Progress:</strong><br>
+                    Stop <span id="currentStopNum">-</span> of <span id="totalStops">-</span><br>
+                    <strong>Distance Covered So Far:</strong> <span id="distanceCovered">0</span> miles
                 </div>
 
                 <div class="step-nav" id="stepNav" style="display: none;">
@@ -356,12 +357,12 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
         }).addTo(map);
 
         let markers = [];
-        let polyline = null;
+        let polylines = [];
         let totalDistance = 0;
         let currentTab = 'csv';
         let allCities = [];
-        let currentStepIndex = -1;
-        let stepMarkers = [];
+        let currentStepIndex = 0;
+        let distanceBetweenCities = [];
 
         // Toggle sidebar
         function toggleSidebar() {
@@ -479,23 +480,19 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
 
                 clearRoute();
                 allCities = cities;
-                currentStepIndex = -1;
-
-                const latlngs = [];
-                let prevLat, prevLng;
+                currentStepIndex = 0;
+                distanceBetweenCities = [];
                 totalDistance = 0;
 
-                // Create markers and polyline
+                // Create all markers
                 cities.forEach((city, index) => {
                     const lat = parseFloat(city.lat);
                     const lng = parseFloat(city.lng);
 
-                    latlngs.push([lat, lng]);
-
                     // Create marker
                     const marker = L.circleMarker([lat, lng], {
                         radius: 8,
-                        fillColor: '#007bff',
+                        fillColor: '#cccccc',
                         color: '#fff',
                         weight: 2,
                         opacity: 1,
@@ -515,7 +512,7 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
                     L.marker([lat, lng], {
                         icon: L.divIcon({
                             className: 'city-label',
-                            html: `<div style="background: #007bff; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${index + 1}</div>`,
+                            html: `<div style="background: #cccccc; color: white; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 12px; border: 2px solid white; box-shadow: 0 2px 4px rgba(0,0,0,0.3);">${index + 1}</div>`,
                             iconSize: [30, 30],
                             iconAnchor: [15, 15]
                         })
@@ -523,30 +520,29 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
 
                     markers.push(marker);
 
-                    // Calculate distance
-                    if (prevLat !== undefined && prevLng !== undefined) {
+                    // Calculate distance between consecutive cities
+                    if (index > 0) {
+                        const prevCity = cities[index - 1];
+                        const prevLat = parseFloat(prevCity.lat);
+                        const prevLng = parseFloat(prevCity.lng);
                         const distance = calculateDistance(prevLat, prevLng, lat, lng);
+                        distanceBetweenCities.push(distance);
                         totalDistance += distance;
                     }
-
-                    prevLat = lat;
-                    prevLng = lng;
                 });
 
-                // Create polyline
-                polyline = L.polyline(latlngs, {
-                    color: '#007bff',
-                    weight: 3,
-                    opacity: 0.7,
-                    dashArray: '5, 5'
-                }).addTo(map);
-
                 // Fit map to route bounds
-                const group = new L.featureGroup(markers);
+                const latlngs = cities.map(city => [parseFloat(city.lat), parseFloat(city.lng)]);
+                const group = new L.featureGroup(
+                    cities.map(city => L.marker([parseFloat(city.lat), parseFloat(city.lng)]))
+                );
                 map.fitBounds(group.getBounds().pad(0.1));
 
                 // Update route info
                 updateRouteInfo(cities);
+
+                // Show first step
+                showStep();
 
                 showMessage(`✅ Route plotted successfully! ${cities.length} cities mapped.`, 'success');
 
@@ -562,7 +558,7 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
 
             let cityListHTML = '';
             cities.forEach((city, index) => {
-                cityListHTML += `<div class="city-item" onclick="goToStep(${index})" id="city-item-${index}"><strong>${index + 1}. ${city.name}</strong><br>${city.lat.toFixed(4)}, ${city.lng.toFixed(4)}</div>`;
+                cityListHTML += `<div class="city-item" id="city-item-${index}"><strong>${index + 1}. ${city.name}</strong></div>`;
             });
 
             document.getElementById('cityList').innerHTML = cityListHTML;
@@ -571,101 +567,86 @@ Washington,Seattle,47.6062,-122.3321"></textarea>
             document.getElementById('stepNav').style.display = 'flex';
         }
 
-        function goToStep(index) {
-            currentStepIndex = index;
-            updateStep();
-        }
-
         function nextStep() {
             if (currentStepIndex < allCities.length - 1) {
                 currentStepIndex++;
-                updateStep();
+                showStep();
             }
         }
 
         function previousStep() {
             if (currentStepIndex > 0) {
                 currentStepIndex--;
-                updateStep();
+                showStep();
             }
         }
 
-        function updateStep() {
-            if (currentStepIndex < 0 || currentStepIndex >= allCities.length) return;
+        function showStep() {
+            // Clear existing polylines
+            polylines.forEach(line => map.removeLayer(line));
+            polylines = [];
 
-            const city = allCities[currentStepIndex];
-            const lat = parseFloat(city.lat);
-            const lng = parseFloat(city.lng);
-
-            // Update step info
-            document.getElementById('currentCityName').textContent = city.name;
-            document.getElementById('currentStopNum').textContent = currentStepIndex + 1;
-            document.getElementById('currentCoords').textContent = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
-
-            // Update city list highlighting
-            document.querySelectorAll('.city-item').forEach((item, index) => {
-                item.classList.remove('active');
-                if (index === currentStepIndex) {
-                    item.classList.add('active');
-                    item.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            // Update all markers - color based on visited status
+            markers.forEach((marker, index) => {
+                if (index <= currentStepIndex) {
+                    marker.setStyle({ fillColor: '#007bff' });
+                } else {
+                    marker.setStyle({ fillColor: '#cccccc' });
                 }
             });
 
-            // Clear previous step marker
-            stepMarkers.forEach(marker => map.removeLayer(marker));
-            stepMarkers = [];
+            // Update city list highlighting
+            document.querySelectorAll('.city-item').forEach((item, index) => {
+                if (index <= currentStepIndex) {
+                    item.style.opacity = '1';
+                    item.style.fontWeight = 'bold';
+                } else {
+                    item.style.opacity = '0.5';
+                    item.style.fontWeight = 'normal';
+                }
+            });
 
-            // Create large marker for current step
-            const stepMarker = L.circleMarker([lat, lng], {
-                radius: 15,
-                fillColor: '#ffc107',
-                color: '#fff',
-                weight: 3,
-                opacity: 1,
-                fillOpacity: 0.9
-            }).addTo(map);
+            // Draw polyline from start to current step
+            const latlngs = [];
+            let distanceCovered = 0;
 
-            const popupContent = `
-                <strong>📍 ${city.name}</strong><br>
-                Stop #${currentStepIndex + 1} of ${allCities.length}<br>
-                Lat: ${lat.toFixed(4)}<br>
-                Lng: ${lng.toFixed(4)}
-            `;
-            stepMarker.bindPopup(popupContent).openPopup();
+            for (let i = 0; i <= currentStepIndex; i++) {
+                const city = allCities[i];
+                latlngs.push([parseFloat(city.lat), parseFloat(city.lng)]);
+                
+                if (i > 0) {
+                    distanceCovered += distanceBetweenCities[i - 1];
+                }
+            }
 
-            stepMarkers.push(stepMarker);
+            if (latlngs.length > 1) {
+                const polyline = L.polyline(latlngs, {
+                    color: '#007bff',
+                    weight: 4,
+                    opacity: 0.8
+                }).addTo(map);
+                polylines.push(polyline);
+            }
 
-            // Add label
-            L.marker([lat, lng], {
-                icon: L.divIcon({
-                    className: 'city-label-step',
-                    html: `<div style="background: #ffc107; color: white; padding: 6px 12px; border-radius: 4px; font-weight: bold; font-size: 14px; border: 3px solid white; box-shadow: 0 2px 8px rgba(0,0,0,0.4);">${currentStepIndex + 1}</div>`,
-                    iconSize: [40, 40],
-                    iconAnchor: [20, 20]
-                })
-            }).addTo(map);
+            // Update step info
+            document.getElementById('currentStopNum').textContent = currentStepIndex + 1;
+            document.getElementById('distanceCovered').textContent = distanceCovered.toFixed(2);
 
-            stepMarkers.push(L.marker([lat, lng]));
-
-            // Pan to current city
-            map.panTo([lat, lng]);
-            map.setZoom(10);
+            // Disable/enable buttons
+            document.querySelector('button[onclick="previousStep()"]').disabled = (currentStepIndex === 0);
+            document.querySelector('button[onclick="nextStep()"]').disabled = (currentStepIndex === allCities.length - 1);
         }
 
         function clearRoute() {
             markers.forEach(marker => map.removeLayer(marker));
-            stepMarkers.forEach(marker => map.removeLayer(marker));
+            polylines.forEach(line => map.removeLayer(line));
             markers = [];
-            stepMarkers = [];
-
-            if (polyline) {
-                map.removeLayer(polyline);
-                polyline = null;
-            }
+            polylines = [];
 
             totalDistance = 0;
-            currentStepIndex = -1;
+            currentStepIndex = 0;
             allCities = [];
+            distanceBetweenCities = [];
             document.getElementById('routeInfo').style.display = 'none';
         }
 

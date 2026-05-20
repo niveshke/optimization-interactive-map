@@ -23,7 +23,7 @@
         }
 
         .sidebar {
-            width: 350px;
+            width: 380px;
             background-color: white;
             padding: 20px;
             overflow-y: auto;
@@ -62,7 +62,38 @@
             font-family: 'Courier New', monospace;
             font-size: 12px;
             resize: vertical;
-            min-height: 150px;
+            min-height: 120px;
+        }
+
+        .tab-buttons {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 15px;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 8px;
+            background-color: #e0e0e0;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+            transition: background-color 0.3s;
+        }
+
+        .tab-btn.active {
+            background-color: #007bff;
+            color: white;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
         }
 
         button {
@@ -169,17 +200,36 @@
             <h1>🗺️ Route Plotter</h1>
             
             <div class="info-box">
-                <strong>Instructions:</strong> Paste your JSON data below with city coordinates, then click "Plot Route" to visualize the path on the map.
+                <strong>Instructions:</strong> Choose between CSV and JSON formats to input city data, then click "Plot Route" to visualize.
             </div>
 
-            <h2>JSON Input Format</h2>
-            <div class="form-group">
-                <label for="jsonInput">Paste your cities JSON:</label>
-                <textarea id="jsonInput" placeholder='[
-  {"name": "New York", "lat": 40.7128, "lng": -74.0060},
-  {"name": "Los Angeles", "lat": 34.0522, "lng": -118.2437},
-  {"name": "Chicago", "lat": 41.8781, "lng": -87.6298}
+            <div class="tab-buttons">
+                <button class="tab-btn active" onclick="switchTab('csv')">📊 CSV Format</button>
+                <button class="tab-btn" onclick="switchTab('json')">📋 JSON Format</button>
+            </div>
+
+            <!-- CSV Tab -->
+            <div id="csv-tab" class="tab-content active">
+                <h2>CSV Format</h2>
+                <div class="form-group">
+                    <label for="csvInput">Paste your cities CSV:</label>
+                    <textarea id="csvInput" placeholder="State,City,Latitude,Longitude
+California,Los Angeles,34.0522,-118.2437
+California,San Francisco,37.7749,-122.4194
+Washington,Seattle,47.6062,-122.3321"></textarea>
+                </div>
+            </div>
+
+            <!-- JSON Tab -->
+            <div id="json-tab" class="tab-content">
+                <h2>JSON Format</h2>
+                <div class="form-group">
+                    <label for="jsonInput">Paste your cities JSON:</label>
+                    <textarea id="jsonInput" placeholder='[
+  {"name": "City Name", "lat": 40.7128, "lng": -74.0060},
+  {"name": "Another City", "lat": 34.0522, "lng": -118.2437}
 ]'></textarea>
+                </div>
             </div>
 
             <button onclick="plotRoute()">📍 Plot Route</button>
@@ -212,6 +262,55 @@
         let markers = [];
         let polyline = null;
         let totalDistance = 0;
+        let currentTab = 'csv';
+
+        // Switch between tabs
+        function switchTab(tab) {
+            currentTab = tab;
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            document.getElementById(tab + '-tab').classList.add('active');
+            document.querySelector(`button[onclick="switchTab('${tab}')"]`).classList.add('active');
+        }
+
+        // Parse CSV data
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) {
+                throw new Error('CSV must have header and at least one data row');
+            }
+
+            const header = lines[0].split(',').map(h => h.trim());
+            const stateIndex = header.findIndex(h => h.toLowerCase() === 'state');
+            const cityIndex = header.findIndex(h => h.toLowerCase() === 'city');
+            const latIndex = header.findIndex(h => h.toLowerCase() === 'latitude');
+            const lngIndex = header.findIndex(h => h.toLowerCase() === 'longitude');
+
+            if (stateIndex === -1 || cityIndex === -1 || latIndex === -1 || lngIndex === -1) {
+                throw new Error('CSV must contain State, City, Latitude, and Longitude columns');
+            }
+
+            const cities = [];
+            for (let i = 1; i < lines.length; i++) {
+                const values = lines[i].split(',').map(v => v.trim());
+                if (values.length > Math.max(stateIndex, cityIndex, latIndex, lngIndex)) {
+                    const state = values[stateIndex];
+                    const city = values[cityIndex];
+                    const lat = parseFloat(values[latIndex]);
+                    const lng = parseFloat(values[lngIndex]);
+
+                    if (!isNaN(lat) && !isNaN(lng) && city && state) {
+                        cities.push({
+                            name: `${city}, ${state}`,
+                            lat: lat,
+                            lng: lng
+                        });
+                    }
+                }
+            }
+
+            return cities;
+        }
 
         // Calculate distance between two coordinates (Haversine formula)
         function calculateDistance(lat1, lon1, lat2, lon2) {
@@ -235,17 +334,26 @@
 
         function plotRoute() {
             try {
-                const jsonText = document.getElementById('jsonInput').value.trim();
-                
-                if (!jsonText) {
-                    showMessage('Please paste JSON data', 'error');
-                    return;
+                let cities = [];
+
+                if (currentTab === 'csv') {
+                    const csvText = document.getElementById('csvInput').value.trim();
+                    if (!csvText) {
+                        showMessage('Please paste CSV data', 'error');
+                        return;
+                    }
+                    cities = parseCSV(csvText);
+                } else {
+                    const jsonText = document.getElementById('jsonInput').value.trim();
+                    if (!jsonText) {
+                        showMessage('Please paste JSON data', 'error');
+                        return;
+                    }
+                    cities = JSON.parse(jsonText);
                 }
 
-                const cities = JSON.parse(jsonText);
-
                 if (!Array.isArray(cities)) {
-                    showMessage('JSON must be an array of cities', 'error');
+                    showMessage('Data must be an array of cities', 'error');
                     return;
                 }
 
@@ -364,14 +472,36 @@
             document.getElementById('routeInfo').style.display = 'none';
         }
 
-        // Example JSON in input on page load
+        // Load default cargo city data on page load
         window.addEventListener('load', () => {
-            const example = [
-                { "name": "Seattle", "lat": 47.6062, "lng": -122.3321 },
-                { "name": "San Francisco", "lat": 37.7749, "lng": -122.4194 },
-                { "name": "Los Angeles", "lat": 34.0522, "lng": -118.2437 }
-            ];
-            document.getElementById('jsonInput').value = JSON.stringify(example, null, 2);
+            const defaultCSV = `State,City,Latitude,Longitude
+California,Sacramento,38.576668,-121.493629
+Colorado,Denver,39.739227,-104.984856
+Illinois,Springfield,39.798363,-89.654961
+Indiana,Indianapolis,39.768623,-86.162643
+Texas,Austin,30.27467,-97.740349
+Washington,Olympia,47.035805,-122.905014
+New York,Albany,42.652843,-73.757874
+Georgia,Atlanta,33.749027,-84.388229
+New York,New York City,40.7128,-74.006
+California,Los Angeles,34.0522,-118.2437
+Illinois,Chicago,41.8781,-87.6298
+Texas,Houston,29.7604,-95.3698
+Pennsylvania,Philadelphia,39.9526,-75.1652
+Texas,San Antonio,29.4241,-98.4936
+California,San Diego,32.7157,-117.1611
+Texas,Dallas,32.7767,-96.797
+California,San Jose,37.3382,-121.8863
+Florida,Jacksonville,30.3322,-81.6557
+Texas,Fort Worth,32.7555,-97.3308
+California,San Francisco,37.7749,-122.4194
+North Carolina,Charlotte,35.2271,-80.8431
+Washington,Seattle,47.6062,-122.3321
+DC,Washington,38.9072,-77.0369
+Texas,El Paso,31.7619,-106.485
+Michigan,Detroit,42.3314,-83.0458
+Oregon,Portland,45.5051,-122.675`;
+            document.getElementById('csvInput').value = defaultCSV;
         });
     </script>
 </body>
